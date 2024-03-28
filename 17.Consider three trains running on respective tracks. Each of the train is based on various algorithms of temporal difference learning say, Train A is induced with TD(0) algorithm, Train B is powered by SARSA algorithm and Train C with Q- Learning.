@@ -1,0 +1,85 @@
+import numpy as np
+
+class Train:
+    def __init__(self, algorithm, num_states, num_actions, alpha=0.1, gamma=0.9, epsilon=0.1):
+        self.algorithm = algorithm
+        self.num_states = num_states
+        self.num_actions = num_actions
+        self.alpha = alpha
+        self.gamma = gamma
+        self.epsilon = epsilon
+        self.q_table = np.zeros((num_states, num_actions))
+
+    def select_action(self, state):
+        if np.random.rand() < self.epsilon:
+            return np.random.randint(self.num_actions)
+        else:
+            return np.argmax(self.q_table[state, :])
+
+    def update(self, state, action, reward, next_state, next_action=None):
+        if self.algorithm == 'TD(0)':
+            target = reward + self.gamma * np.max(self.q_table[next_state, :])
+        elif self.algorithm == 'SARSA':
+            target = reward + self.gamma * self.q_table[next_state, next_action]
+        elif self.algorithm == 'Q-Learning':
+            target = reward + self.gamma * np.max(self.q_table[next_state, :])
+
+        self.q_table[state, action] += self.alpha * (target - self.q_table[state, action])
+
+def run_simulation(train, num_episodes=1000):
+    total_rewards = []
+    for episode in range(num_episodes):
+        state = 0  # Initial state
+        total_reward = 0
+        steps = 0
+        while state != 5:  # Terminal state
+            action = train.select_action(state)
+            next_state, reward = transition(state, action)
+            target = train.update(state, action, reward, next_state)
+            state = next_state
+            total_reward += reward
+            steps += 1
+            print(f"Episode: {episode + 1}, Step: {steps}, State: {state}, Action: {action}, Reward: {reward}, Target: {target}")
+        total_rewards.append(total_reward)
+    return total_rewards
+
+def transition(state, action):
+    # Define a simple environment
+    transitions = {
+        (0, 0): (1, -1),
+        (0, 1): (2, 1),
+        (1, 0): (3, -1),
+        (1, 1): (2, 1),
+        (2, 0): (4, -1),
+        (2, 1): (3, 1),
+        (3, 0): (5, -1),
+        (3, 1): (4, 1),
+        (4, 0): (5, -1),
+        (4, 1): (5, 10)  # High reward for reaching the goal state
+    }
+    return transitions[(state, action)]
+
+# Define parameters
+num_states = 6  # Including the terminal state
+num_actions = 2
+num_episodes = 3  # Reduced number of episodes for demonstration
+
+# Create trains
+train_A = Train('TD(0)', num_states, num_actions)
+train_B = Train('SARSA', num_states, num_actions)
+train_C = Train('Q-Learning', num_states, num_actions)
+
+# Run simulations
+rewards_A = run_simulation(train_A, num_episodes)
+rewards_B = run_simulation(train_B, num_episodes)
+rewards_C = run_simulation(train_C, num_episodes)
+
+# Calculate average rewards
+avg_reward_A = np.mean(rewards_A)
+avg_reward_B = np.mean(rewards_B)
+avg_reward_C = np.mean(rewards_C)
+
+print("Average rewards:")
+print("Train A (TD(0)): ", avg_reward_A)
+print("Train B (SARSA): ", avg_reward_B)
+print("Train C (Q-Learning): ", avg_reward_C)
