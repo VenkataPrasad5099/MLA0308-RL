@@ -1,0 +1,132 @@
+import numpy as np
+import tensorflow as tf
+import gym
+
+# Define hyperparameters
+gamma = 0.99  # Discount factor
+epsilon = 0.2  # Clip parameter for PPO
+actor_lr = 0.0003  # Actor learning rate
+critic_lr = 0.001  # Critic learning rate
+num_epochs = 10  # Number of optimization epochs
+batch_size = 64  # Batch size for training
+env_name = 'CartPole-v1'  # Environment name
+
+# Create environment
+env = gym.make(env_name)
+state_dim = env.observation_space.shape[0]
+action_dim = env.action_space.n
+
+# Define actor and critic networks
+class Actor(tf.keras.Model):
+    def _init_(self, state_dim, action_dim):
+        super(Actor, self)._init_()
+        self.fc1 = tf.keras.layers.Dense(64, activation='relu')
+        self.fc2 = tf.keras.layers.Dense(64, activation='relu')
+        self.fc3 = tf.keras.layers.Dense(action_dim, activation='softmax')
+
+    def call(self, state):
+        x = self.fc1(state)
+        x = self.fc2(x)
+        x = self.fc3(x)
+        return x
+
+class Critic(tf.keras.Model):
+    def _init_(self, state_dim):
+        super(Critic, self)._init_()
+        self.fc1 = tf.keras.layers.Dense(64, activation='relu')
+        self.fc2 = tf.keras.layers.Dense(64, activation='relu')
+        self.fc3 = tf.keras.layers.Dense(1)
+
+    def call(self, state):
+        x = self.fc1(state)
+        x = self.fc2(x)
+        x = self.fc3(x)
+        return x
+
+# Define PPO algorithm
+class PPO:
+    def _init_(self, state_dim, action_dim):
+        self.actor = Actor(state_dim, action_dim)
+        self.critic = Critic(state_dim)
+        self.actor_optimizer = tf.keras.optimizers.Adam(actor_lr)
+        self.critic_optimizer = tf.keras.optimizers.Adam(critic_lr)
+
+    def get_action(self, state):
+        state = tf.convert_to_tensor([state], dtype=tf.float32)
+        probs = self.actor(state)
+        action = np.random.choice(action_dim, p=np.squeeze(probs))
+        return action
+
+    def compute_returns(self, rewards, dones, next_value):
+        returns = np.zeros_like(rewards)
+        cumulative_return = next_value
+        for t in reversed(range(len(rewards))):
+            cumulative_return = rewards[t] + gamma * cumulative_return * (1 - dones[t])
+            returns[t] = cumulative_return
+        return returns
+
+    def update(self, states, actions, returns, advantages):
+        with tf.GradientTape() as actor_tape, tf.GradientTape() as critic_tape:
+            # Actor loss
+            probs = self.actor(states)
+            actions_one_hot = tf.one_hot(actions, action_dim)
+            old_probs = tf.reduce_sum(actions_one_hot * probs, axis=1)
+            old_probs = tf.clip_by_value(old_probs, 1e-10, 1.0)
+            
+            ratios = tf.exp(tf.math.log(probs) - tf.math.log(old_probs))
+            surr1 = ratios * advantages
+            surr2 = tf.clip_by_value(ratios, 1 - epsilon, 1 + epsilon) * advantages
+            actor_loss = -tf.reduce_mean(tf.minimum(surr1, surr2))
+            
+            # Critic loss
+            values = self.critic(states)
+            critic_loss = tf.reduce_mean(tf.square(returns - values))
+            
+            # Total loss
+            total_loss = actor_loss + critic_loss
+
+        actor_grads = actor_tape.gradient(total_loss, self.actor.trainable_variables)
+        critic_grads = critic_tape.gradient(critic_loss, self.critic.trainable_variables)
+
+        self.actor_optimizer.apply_gradients(zip(actor_grads, self.actor.trainable_variables))
+        self.critic_optimizer.apply_gradients(zip(critic_grads, self.critic.trainable_variables))
+
+# Initialize PPO agent
+ppo_agent = PPO(state_dim, action_dim)
+
+# Training loop
+for epoch in range(num_epochs):
+    states, actions, rewards, dones, next_states = [], [], [], [], []
+    ep_rewards = []
+
+    state = env.reset()
+    done = False
+    while not done:
+        action = ppo_agent.get_action(state)
+        next_state, reward, done, _ = env.step(action)
+        
+        states.append(state)
+        actions.append(action)
+        rewards.append(reward)
+        dones.append(done)
+        next_states.append(next_state)
+        
+        state = next_state
+        ep_rewards.append(reward)
+        
+        if len(states) >= batch_size:
+            next_value = ppo_agent.critic(tf.convert_to_tensor([next_states[-1]], dtype=tf.float32))
+            returns = ppo_agent.compute_returns(rewards, dones, next_value)
+            
+            states = tf.convert_to_tensor(states, dtype=tf.float32)
+            actions = tf.convert_to_tensor(actions, dtype=tf.int32)
+            returns = tf.convert_to_tensor(returns, dtype=tf.float32)
+            
+            advantages = returns - ppo_agent.critic(states)
+            advantages = tf.squeeze(advantages)
+            
+            ppo_agent.update(states, actions, returns, advantages)
+            
+            states, actions, rewards, dones, next_states = [], [], [], [], []
+
+    print(f"Epoch: {epoch+1}, Mean Reward: {np.mean(ep_rewards)}")
